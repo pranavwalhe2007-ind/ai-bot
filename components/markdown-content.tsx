@@ -10,49 +10,46 @@ type ChatMessage = {
 
 const systemByMode: Record<ChatMode, string> = {
   general:
-    "You are a sharp, friendly AI assistant. Give clear, practical, and helpful answers. Be concise but complete. Explain ideas simply, ask clarifying questions when important, and adapt to the user’s level of expertise.",
+    "You are a helpful, thoughtful AI assistant. Be clear, practical, and warm. Give direct answers, explain complex ideas simply, and ask clarifying questions only when important.",
   coding:
-    "You are an elite software engineer and debugging assistant. Explain code clearly, give secure and maintainable solutions, provide examples, and point out edge cases and trade-offs. Prefer correct, production-minded answers with concise reasoning.",
+    "You are an elite software engineer. Answer with secure, maintainable, production-minded guidance. Explain trade-offs, edge cases, code patterns, and debugging steps clearly and accurately.",
   creative:
-    "You are a creative strategist and writing assistant. Help brainstorm ideas, refine tone, write compelling content, and make concepts more vivid and persuasive. Keep responses imaginative, structured, and polished.",
+    "You are a creative strategist and writer. Help brainstorm ideas, reshape tone, structure compelling arguments, and generate polished, vivid content that feels premium and intentional.",
   research:
-    "You are a research and analysis assistant. Summarize complex topics clearly, compare ideas, identify risks and assumptions, and present well-structured insights. Prefer evidence-based explanations and useful frameworks.",
+    "You are a research and analysis assistant. Synthesize information clearly, compare options, highlight assumptions, and present practical conclusions with nuance and structure.",
 };
 
 function fallbackReply(mode: ChatMode, prompt: string): string {
   const value = prompt.trim();
-
-  if (!value) {
-    return "Ask me anything and I’ll help you with it.";
-  }
+  if (!value) return "Ask me anything and I’ll help you.";
 
   const lower = value.toLowerCase();
 
   if (mode === "coding") {
-    return `Here’s the practical approach: break the problem into inputs, expected output, and edge cases first. Share the exact code, stack, and error message, and I’ll give you a precise fix or clean implementation. If you want, I can also help with debugging, optimization, or architecture.`;
+    return `Start by identifying the actual input, expected output, and failure case. Then I can help you design the fix or refactor. Share the code, error message, and stack trace if you want a precise answer.`;
   }
 
   if (mode === "creative") {
-    return `Here’s a strong starting point: define your audience, objective, tone, and angle first. I can help you refine the idea, structure it, and turn it into something polished and memorable. Send the topic and target style, and I’ll draft it for you.`;
+    return `A strong creative answer begins with audience, purpose, tone, and message. Tell me the target audience and goal, and I’ll help you shape a better version with more clarity and impact.`;
   }
 
   if (mode === "research") {
-    return `I’d approach this by separating the problem into: what is known, what is uncertain, key trade-offs, and likely conclusions. Share the topic and any source material, and I’ll synthesize a sharper summary or comparison.`;
+    return `Break the topic into: what is known, what is uncertain, what trade-offs exist, and what likely conclusion fits the evidence. Share the source or context and I’ll synthesize a cleaner answer.`;
   }
 
   if (lower.includes("hello") || lower.includes("hi")) {
-    return "Hello! I’m ready to help with coding, ideas, writing, study questions, or general reasoning. Ask me anything.";
+    return "Hello! I’m ready to help with coding, brainstorming, writing, study questions, and everyday problem-solving.";
   }
 
-  if (lower.includes("code") || lower.includes("javascript") || lower.includes("python") || lower.includes("typescript")) {
-    return "I can help with that. Share the exact code, error, or goal you’re trying to achieve, and I’ll give you a clear, practical solution.";
+  if (lower.includes("code") || lower.includes("javascript") || lower.includes("typescript") || lower.includes("python")) {
+    return "I can help with that. Share the exact code, issue, or error and I’ll give you a clear, practical fix.";
   }
 
-  if (lower.includes("write") || lower.includes("email") || lower.includes("essay") || lower.includes("resume")) {
-    return "Absolutely. Tell me the audience, tone, purpose, and key points, and I’ll draft something polished and effective for you.";
+  if (lower.includes("write") || lower.includes("essay") || lower.includes("email") || lower.includes("resume")) {
+    return "Absolutely. Tell me the audience, purpose, and desired tone, and I’ll draft something polished and effective for you.";
   }
 
-  return `I’m in assistive mode now, so I can provide a helpful answer even without the full API. For the strongest answer, include the question, context, and any constraints. Then I’ll give you a clear solution or explanation.`;
+  return `I can help with that. Give me the context and the goal, and I’ll turn it into a clear, useful answer with the right level of detail.`;
 }
 
 export async function POST(req: NextRequest) {
@@ -64,7 +61,6 @@ export async function POST(req: NextRequest) {
         : "general";
 
     const incomingMessages: ChatMessage[] = Array.isArray(body?.messages) ? body.messages : [];
-
     const messages = incomingMessages
       .filter((message) => typeof message?.content === "string" && message.content.trim().length > 0)
       .map((message) => ({
@@ -78,7 +74,6 @@ export async function POST(req: NextRequest) {
     }
 
     const geminiKey = process.env.GEMINI_API_KEY;
-
     if (!geminiKey) {
       const lastPrompt = messages[messages.length - 1]?.content ?? "help me";
       return NextResponse.json({
@@ -99,20 +94,38 @@ export async function POST(req: NextRequest) {
       parts: [{ text: message.content }],
     }));
 
-    const result = await model.generateContent({ contents });
-    const response = await result.response;
-    const reply = response.text();
+    const result = await model.generateContentStream({ contents });
 
-    return NextResponse.json({
-      reply,
-      mode,
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+
+        try {
+          for await (const chunk of result.stream) {
+            const text = chunk.text();
+            if (text) {
+              controller.enqueue(encoder.encode(text));
+            }
+          }
+          controller.close();
+        } catch (error) {
+          console.error("Streaming chat error:", error);
+          controller.error(error);
+        }
+      },
+    });
+
+    return new NextResponse(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+      },
     });
   } catch (error) {
     console.error("Chat API error:", error);
     return NextResponse.json(
       {
-        reply:
-          "I ran into a temporary issue. Please try again in a moment, or rephrase your question more simply.",
+        reply: "I hit a temporary issue. Please try again in a moment.",
         mode: "general",
       },
       { status: 500 }

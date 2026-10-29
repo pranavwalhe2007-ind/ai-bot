@@ -31,7 +31,7 @@ type Conversation = {
 
 const STORAGE_KEY = "intellibot-chat-history-v2";
 const defaultWelcome =
-  "Hi! I’m your personal AI assistant. Ask me for code help, ideas, business strategy, writing, or general explanations.";
+  "Hi! I’m your personal AI assistant. Ask me for code help, ideas, writing, planning, or general explanations.";
 
 const modeMeta: Record<ChatMode, { label: string; accent: string; prompt: string }> = {
   general: {
@@ -58,19 +58,19 @@ const modeMeta: Record<ChatMode, { label: string; accent: string; prompt: string
 
 const starterPrompts: Record<ChatMode, string[]> = {
   general: [
-    "Explain machine learning in simple terms",
-    "How do I make better daily routines?",
-    "Give me a plan to improve my productivity",
+    "Explain machine learning simply",
+    "How do I build better daily habits?",
+    "Plan a productive study schedule",
   ],
   coding: [
-    "Review this Node.js API for mistakes",
-    "Explain how async/await works in JavaScript",
-    "Build a clean login flow in Next.js",
+    "Review this Node.js API for issues",
+    "Explain async/await with examples",
+    "Design a clean login flow in Next.js",
   ],
   creative: [
-    "Write a powerful product launch headline",
+    "Write a premium product headline",
     "Give me 5 campaign ideas for a startup",
-    "Help me rewrite this paragraph to sound premium",
+    "Rewrite this paragraph in a more compelling style",
   ],
   research: [
     "Compare blockchain and traditional databases",
@@ -100,10 +100,6 @@ function buildConversation(mode: ChatMode): Conversation {
   };
 }
 
-function toPlainText(value: string): string {
-  return value.replace(/```[\s\S]*?```/g, "").replace(/[#>*_`\-]/g, " ").replace(/\s+/g, " ").trim();
-}
-
 export default function ChatApp() {
   const [mode, setMode] = useState<ChatMode>("general");
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -113,25 +109,28 @@ export default function ChatApp() {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (!saved) {
         const first = buildConversation(mode);
         setConversations([first]);
         setActiveConversationId(first.id);
         return;
       }
 
-      const parsed = JSON.parse(raw) as Conversation[];
+      const parsed = JSON.parse(saved) as Conversation[];
       if (Array.isArray(parsed) && parsed.length > 0) {
         setConversations(parsed);
         setActiveConversationId(parsed[0].id);
-        setMode(parsed[0].mode || "general");
+        if (parsed[0].mode) setMode(parsed[0].mode);
+        return;
       }
     } catch {
-      const first = buildConversation(mode);
-      setConversations([first]);
-      setActiveConversationId(first.id);
+      // fallback below
     }
+
+    const first = buildConversation(mode);
+    setConversations([first]);
+    setActiveConversationId(first.id);
   }, []);
 
   useEffect(() => {
@@ -154,7 +153,7 @@ export default function ChatApp() {
 
   const deleteConversation = (id: string) => {
     setConversations((prev) => {
-      const next = prev.filter((c) => c.id !== id);
+      const next = prev.filter((conversation) => conversation.id !== id);
       if (next.length === 0) {
         const replacement = buildConversation(mode);
         setActiveConversationId(replacement.id);
@@ -175,13 +174,15 @@ export default function ChatApp() {
       title: "New chat",
     };
     setConversations((prev) =>
-      prev.map((conversation) => (conversation.id === activeConversation.id ? cleaned : conversation))
+      prev.map((conversation) =>
+        conversation.id === activeConversation.id ? cleaned : conversation
+      )
     );
   };
 
   const copyLastAssistant = async () => {
     if (!activeConversation) return;
-    const lastAssistant = [...activeConversation.messages].reverse().find((m) => m.role === "assistant");
+    const lastAssistant = [...activeConversation.messages].reverse().find((message) => message.role === "assistant");
     if (!lastAssistant) return;
     await navigator.clipboard.writeText(lastAssistant.content);
   };
@@ -220,21 +221,70 @@ export default function ChatApp() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode,
-          messages: nextMessages,
-        }),
+        body: JSON.stringify({ mode, messages: nextMessages }),
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.error || "Unable to get a reply.");
+      const reader = response.body?.getReader();
+      if (!reader) {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || "Unable to get a response.");
+        }
+        const finalReply = data.reply || "I’m here to help. Can you rephrase that?";
+        const finalConversation: Conversation = {
+          ...updatedConversation,
+          messages: [...nextMessages, createMessage("assistant", finalReply)],
+        };
+        setConversations((prev) =>
+          prev.map((conversation) =>
+            conversation.id === finalConversation.id ? finalConversation : conversation
+          )
+        );
+        return;
       }
 
-      const reply = data.reply || "I’m here to help. Can you rephrase that?";
+      const decoder = new TextDecoder();
+      let answer = "";
+      const assistantMessageId = crypto.randomUUID();
+
+      const streamConversation: Conversation = {
+        ...updatedConversation,
+        messages: [...nextMessages, createMessage("assistant", "")],
+      };
+
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id === streamConversation.id ? streamConversation : conversation
+        )
+      );
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        answer += chunk;
+
+        setConversations((prev) =>
+          prev.map((conversation) =>
+            conversation.id === streamConversation.id
+              ? {
+                  ...conversation,
+                  messages: conversation.messages.map((message) =>
+                    message.id === streamConversation.messages[streamConversation.messages.length - 1].id
+                      ? { ...message, content: answer }
+                      : message
+                  ),
+                }
+              : conversation
+          )
+        );
+      }
+
+      const finalText = `${answer}`.trim() || "I’m here to help. Can you rephrase that?";
       const finalConversation: Conversation = {
         ...updatedConversation,
-        messages: [...nextMessages, createMessage("assistant", reply)],
+        messages: [...nextMessages, createMessage("assistant", finalText)],
       };
 
       setConversations((prev) =>
@@ -246,12 +296,8 @@ export default function ChatApp() {
       console.error(error);
       const failedConversation: Conversation = {
         ...updatedConversation,
-        messages: [
-          ...nextMessages,
-          createMessage("assistant", "Something went wrong. Please try again in a moment."),
-        ],
+        messages: [...nextMessages, createMessage("assistant", "Something went wrong. Please try again.")],
       };
-
       setConversations((prev) =>
         prev.map((conversation) =>
           conversation.id === failedConversation.id ? failedConversation : conversation
@@ -359,7 +405,7 @@ export default function ChatApp() {
               onClick={copyLastAssistant}
               className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 transition hover:border-cyan-400 hover:text-white"
             >
-              Copy last answer
+              <span className="inline-flex items-center gap-2"><Copy size={14} /> Copy</span>
             </button>
             <button
               type="button"
