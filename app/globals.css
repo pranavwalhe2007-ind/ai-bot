@@ -1,47 +1,15 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+import type { Metadata } from "next";
+import "./globals.css";
 
-:root {
-  color-scheme: dark;
-}
+export const metadata: Metadata = {
+  title: "IntelliBot AI",
+  description: "A premium AI assistant app for coding, writing, research, and productivity.",
+};
 
-html,
-body {
-  margin: 0;
-  min-height: 100%;
-  background: #020817;
-  color: #e2e8f0;
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-body {
-  min-height: 100vh;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-::-webkit-scrollbar {
-  width: 9px;
-}
-
-::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.8);
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.9);
-  border-radius: 999px;
-}
-
-button,
-input,
-textarea {
-  font: inherit;
-}
-
-textarea {
-  resize: none;
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body>{children}</body>
+    </html>
+  );
 }

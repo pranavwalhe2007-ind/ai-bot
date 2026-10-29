@@ -10,13 +10,13 @@ type ChatMessage = {
 
 const systemByMode: Record<ChatMode, string> = {
   general:
-    "You are a helpful, thoughtful AI assistant. Be clear, practical, and warm. Give direct answers, explain complex ideas simply, and ask clarifying questions only when important.",
+    "You are a thoughtful, highly capable AI assistant. Be clear, practical, and concise. Prefer direct answers, useful structure, and strong explanations. Ask clarifying questions only when they materially improve the answer.",
   coding:
-    "You are an elite software engineer. Answer with secure, maintainable, production-minded guidance. Explain trade-offs, edge cases, code patterns, and debugging steps clearly and accurately.",
+    "You are an elite software engineer and debugging assistant. Explain trade-offs, edge cases, design patterns, and code issues clearly. Prefer production-safe, maintainable solutions. Give concise but practical guidance with examples when useful.",
   creative:
-    "You are a creative strategist and writer. Help brainstorm ideas, reshape tone, structure compelling arguments, and generate polished, vivid content that feels premium and intentional.",
+    "You are a high-end creative strategist and writer. Help generate ideas, shape tone, structure compelling messaging, and polish content with clarity, emotional impact, and premium quality.",
   research:
-    "You are a research and analysis assistant. Synthesize information clearly, compare options, highlight assumptions, and present practical conclusions with nuance and structure.",
+    "You are a research and analysis assistant. Synthesize complex topics clearly, compare options, state assumptions, and highlight likely trade-offs and conclusions. Prefer evidence-based reasoning and practical summaries.",
 };
 
 function fallbackReply(mode: ChatMode, prompt: string): string {
@@ -26,35 +26,36 @@ function fallbackReply(mode: ChatMode, prompt: string): string {
   const lower = value.toLowerCase();
 
   if (mode === "coding") {
-    return `Start by identifying the actual input, expected output, and failure case. Then I can help you design the fix or refactor. Share the code, error message, and stack trace if you want a precise answer.`;
+    return "Start by clarifying the actual input, expected output, and failing case. Then I can help design the exact fix or improvement. Share the code, error message, and stack trace if you want a precise answer.";
   }
 
   if (mode === "creative") {
-    return `A strong creative answer begins with audience, purpose, tone, and message. Tell me the target audience and goal, and I’ll help you shape a better version with more clarity and impact.`;
+    return "Start with audience, objective, tone, and message. Once those are clear, I can help shape a more compelling and premium version that feels intentional and polished.";
   }
 
   if (mode === "research") {
-    return `Break the topic into: what is known, what is uncertain, what trade-offs exist, and what likely conclusion fits the evidence. Share the source or context and I’ll synthesize a cleaner answer.`;
+    return "Break the topic into knowns, unknowns, trade-offs, and likely conclusions. Once that structure is clear, I can synthesize a sharper and more practical answer.";
   }
 
   if (lower.includes("hello") || lower.includes("hi")) {
-    return "Hello! I’m ready to help with coding, brainstorming, writing, study questions, and everyday problem-solving.";
+    return "Hello! I’m ready to help with coding, writing, strategy, research, and general problem-solving.";
   }
 
   if (lower.includes("code") || lower.includes("javascript") || lower.includes("typescript") || lower.includes("python")) {
-    return "I can help with that. Share the exact code, issue, or error and I’ll give you a clear, practical fix.";
+    return "I can help with that. Share the exact code, issue, or error, and I’ll give you a clear, practical fix.";
   }
 
   if (lower.includes("write") || lower.includes("essay") || lower.includes("email") || lower.includes("resume")) {
-    return "Absolutely. Tell me the audience, purpose, and desired tone, and I’ll draft something polished and effective for you.";
+    return "Absolutely. Tell me the audience, purpose, and tone, and I’ll draft something polished and effective for you.";
   }
 
-  return `I can help with that. Give me the context and the goal, and I’ll turn it into a clear, useful answer with the right level of detail.`;
+  return "I can help with that. Give me the goal, the context, and any constraints, and I’ll turn it into a clear, useful answer.";
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
+
     const mode: ChatMode =
       typeof body?.mode === "string" && body.mode in systemByMode
         ? (body.mode as ChatMode)
@@ -99,7 +100,6 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-
         try {
           for await (const chunk of result.stream) {
             const text = chunk.text();
