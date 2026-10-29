@@ -1,9 +1,450 @@
-import ChatApp from "@/components/chat-app";
+"use client";
 
-export default function HomePage() {
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  Bot,
+  Copy,
+  LoaderCircle,
+  MessageSquarePlus,
+  PencilLine,
+  SendHorizonal,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import MarkdownContent from "@/components/markdown-content";
+
+type MessageRole = "user" | "assistant";
+type ChatMode = "general" | "coding" | "creative" | "research";
+
+type Message = {
+  id: string;
+  role: MessageRole;
+  content: string;
+};
+
+type Conversation = {
+  id: string;
+  title: string;
+  mode: ChatMode;
+  messages: Message[];
+};
+
+const STORAGE_KEY = "intellibot-chat-history-v2";
+const defaultWelcome =
+  "Hi! I’m your personal AI assistant. Ask me for code help, ideas, business strategy, writing, or general explanations.";
+
+const modeMeta: Record<ChatMode, { label: string; accent: string; prompt: string }> = {
+  general: {
+    label: "General",
+    accent: "from-cyan-500 to-blue-500",
+    prompt: "Answer clearly and helpfully.",
+  },
+  coding: {
+    label: "Coding",
+    accent: "from-violet-500 to-fuchsia-500",
+    prompt: "Debug and architect software.",
+  },
+  creative: {
+    label: "Creative",
+    accent: "from-pink-500 to-rose-500",
+    prompt: "Write and brainstorm creatively.",
+  },
+  research: {
+    label: "Research",
+    accent: "from-emerald-500 to-teal-500",
+    prompt: "Analyse and synthesize ideas.",
+  },
+};
+
+const starterPrompts: Record<ChatMode, string[]> = {
+  general: [
+    "Explain machine learning in simple terms",
+    "How do I make better daily routines?",
+    "Give me a plan to improve my productivity",
+  ],
+  coding: [
+    "Review this Node.js API for mistakes",
+    "Explain how async/await works in JavaScript",
+    "Build a clean login flow in Next.js",
+  ],
+  creative: [
+    "Write a powerful product launch headline",
+    "Give me 5 campaign ideas for a startup",
+    "Help me rewrite this paragraph to sound premium",
+  ],
+  research: [
+    "Compare blockchain and traditional databases",
+    "Summarize the pros and cons of remote work",
+    "What should I research before starting a business?",
+  ],
+};
+
+function createMessage(role: MessageRole, content: string): Message {
+  return { id: crypto.randomUUID(), role, content };
+}
+
+function makeTitle(prompt: string): string {
+  const cleaned = prompt.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "New chat";
+  const words = cleaned.split(" ").slice(0, 5);
+  const title = words.join(" ");
+  return title.length > 26 ? `${title.slice(0, 23)}...` : title;
+}
+
+function buildConversation(mode: ChatMode): Conversation {
+  return {
+    id: crypto.randomUUID(),
+    title: "New chat",
+    mode,
+    messages: [createMessage("assistant", defaultWelcome)],
+  };
+}
+
+function toPlainText(value: string): string {
+  return value.replace(/```[\s\S]*?```/g, "").replace(/[#>*_`\-]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+export default function ChatApp() {
+  const [mode, setMode] = useState<ChatMode>("general");
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        const first = buildConversation(mode);
+        setConversations([first]);
+        setActiveConversationId(first.id);
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as Conversation[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setConversations(parsed);
+        setActiveConversationId(parsed[0].id);
+        setMode(parsed[0].mode || "general");
+      }
+    } catch {
+      const first = buildConversation(mode);
+      setConversations([first]);
+      setActiveConversationId(first.id);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (conversations.length > 0) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+    }
+  }, [conversations]);
+
+  const activeConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
+    [conversations, activeConversationId]
+  );
+
+  const createNewChat = (newMode: ChatMode = mode) => {
+    const chat = buildConversation(newMode);
+    setConversations((prev) => [chat, ...prev]);
+    setActiveConversationId(chat.id);
+    setInput("");
+  };
+
+  const deleteConversation = (id: string) => {
+    setConversations((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      if (next.length === 0) {
+        const replacement = buildConversation(mode);
+        setActiveConversationId(replacement.id);
+        return [replacement];
+      }
+      if (activeConversationId === id) {
+        setActiveConversationId(next[0].id);
+      }
+      return next;
+    });
+  };
+
+  const clearCurrentConversation = () => {
+    if (!activeConversation) return;
+    const cleaned: Conversation = {
+      ...activeConversation,
+      messages: [createMessage("assistant", "Conversation cleared. Ask me anything new.")],
+      title: "New chat",
+    };
+    setConversations((prev) =>
+      prev.map((conversation) => (conversation.id === activeConversation.id ? cleaned : conversation))
+    );
+  };
+
+  const copyLastAssistant = async () => {
+    if (!activeConversation) return;
+    const lastAssistant = [...activeConversation.messages].reverse().find((m) => m.role === "assistant");
+    if (!lastAssistant) return;
+    await navigator.clipboard.writeText(lastAssistant.content);
+  };
+
+  const sendMessage = async (customText?: string) => {
+    const text = (customText ?? input).trim();
+    if (!text || isLoading) return;
+
+    const chat = activeConversation ?? buildConversation(mode);
+    const userMessage = createMessage("user", text);
+    const nextMessages = [...chat.messages, userMessage];
+    const nextTitle = chat.title === "New chat" ? makeTitle(text) : chat.title;
+
+    const updatedConversation: Conversation = {
+      ...chat,
+      title: nextTitle,
+      mode,
+      messages: nextMessages,
+    };
+
+    setConversations((prev) => {
+      const exists = prev.some((conversation) => conversation.id === updatedConversation.id);
+      if (!exists) {
+        return [updatedConversation, ...prev];
+      }
+      return prev.map((conversation) =>
+        conversation.id === updatedConversation.id ? updatedConversation : conversation
+      );
+    });
+
+    setInput("");
+    setIsLoading(true);
+    setActiveConversationId(updatedConversation.id);
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          messages: nextMessages,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || "Unable to get a reply.");
+      }
+
+      const reply = data.reply || "I’m here to help. Can you rephrase that?";
+      const finalConversation: Conversation = {
+        ...updatedConversation,
+        messages: [...nextMessages, createMessage("assistant", reply)],
+      };
+
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id === finalConversation.id ? finalConversation : conversation
+        )
+      );
+    } catch (error) {
+      console.error(error);
+      const failedConversation: Conversation = {
+        ...updatedConversation,
+        messages: [
+          ...nextMessages,
+          createMessage("assistant", "Something went wrong. Please try again in a moment."),
+        ],
+      };
+
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id === failedConversation.id ? failedConversation : conversation
+        )
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    await sendMessage();
+  };
+
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
-      <ChatApp />
-    </main>
+    <div className="mx-auto flex min-h-screen w-full max-w-7xl gap-4 px-4 py-5 sm:px-6 lg:px-8">
+      <aside className="hidden w-80 shrink-0 rounded-3xl border border-slate-800 bg-slate-900/85 p-4 shadow-2xl shadow-slate-950/30 lg:flex lg:flex-col">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="rounded-2xl bg-cyan-500/15 p-2 text-cyan-300">
+              <Bot size={20} />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">AI Suite</p>
+              <h2 className="text-lg font-semibold text-white">IntelliBot</h2>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => createNewChat()}
+            className="rounded-xl border border-slate-700 bg-slate-800 p-2 text-slate-200 transition hover:border-cyan-400 hover:text-white"
+            aria-label="New chat"
+          >
+            <MessageSquarePlus size={17} />
+          </button>
+        </div>
+
+        <div className="mb-3 rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-300">
+          <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-400">
+            <Sparkles size={12} className="text-cyan-400" />
+            Mode
+          </div>
+          <select
+            value={mode}
+            onChange={(event) => setMode(event.target.value as ChatMode)}
+            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-500"
+          >
+            {Object.entries(modeMeta).map(([key, value]) => (
+              <option key={key} value={key}>
+                {value.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+          {conversations.map((conversation) => (
+            <div
+              key={conversation.id}
+              className={`group flex cursor-pointer items-center justify-between gap-2 rounded-2xl border px-3 py-2 transition ${
+                activeConversationId === conversation.id
+                  ? "border-cyan-500/50 bg-slate-800 text-white"
+                  : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-600"
+              }`}
+              onClick={() => setActiveConversationId(conversation.id)}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                  {modeMeta[conversation.mode].label}
+                </div>
+                <span className="block truncate text-sm font-medium">{conversation.title}</span>
+              </div>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  deleteConversation(conversation.id);
+                }}
+                className="rounded-lg p-1 text-slate-400 opacity-0 transition group-hover:opacity-100 hover:bg-slate-700 hover:text-white"
+                aria-label="Delete chat"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <main className="flex min-h-[80vh] flex-1 flex-col rounded-3xl border border-slate-800 bg-slate-900/80 shadow-2xl shadow-slate-950/30">
+        <header className="flex items-center justify-between border-b border-slate-800 px-4 py-4 sm:px-5">
+          <div className="flex items-center gap-3">
+            <div className={`rounded-xl bg-gradient-to-r ${modeMeta[mode].accent} p-2 text-white`}>
+              <PencilLine size={16} />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Assistant</p>
+              <h1 className="mt-1 text-xl font-semibold text-white">{modeMeta[mode].label}</h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={copyLastAssistant}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 transition hover:border-cyan-400 hover:text-white"
+            >
+              Copy last answer
+            </button>
+            <button
+              type="button"
+              onClick={clearCurrentConversation}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 transition hover:border-rose-500 hover:text-white"
+            >
+              Clear
+            </button>
+          </div>
+        </header>
+
+        <div className="mb-4 flex flex-wrap gap-2 border-b border-slate-800 px-4 py-3 sm:px-5">
+          {starterPrompts[mode].map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => sendMessage(prompt)}
+              className="rounded-full border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 transition hover:border-cyan-400 hover:text-white sm:text-sm"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+
+        <section className="flex-1 overflow-hidden">
+          <div className="h-[60vh] space-y-4 overflow-y-auto p-4 sm:p-6">
+            {activeConversation?.messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-3xl rounded-2xl px-4 py-3 text-sm leading-7 shadow-lg sm:text-base ${
+                    message.role === "user"
+                      ? "bg-cyan-600 text-white"
+                      : "border border-slate-700 bg-slate-800 text-slate-100"
+                  }`}
+                >
+                  {message.role === "assistant" && message.content ? (
+                    <MarkdownContent content={message.content} />
+                  ) : (
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-3 text-slate-300">
+                  <span className="inline-flex items-center gap-2">
+                    <LoaderCircle className="h-4 w-4 animate-spin text-cyan-400" />
+                    Thinking...
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <form onSubmit={handleSubmit} className="border-t border-slate-800 bg-slate-950/70 p-4 sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendMessage();
+                }
+              }}
+              rows={3}
+              placeholder={`Ask in ${modeMeta[mode].label.toLowerCase()} mode...`}
+              className="flex-1 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-500"
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              className="flex items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+            >
+              <SendHorizonal size={18} />
+            </button>
+          </div>
+        </form>
+      </main>
+    </div>
   );
 }
